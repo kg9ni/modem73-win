@@ -76,7 +76,8 @@ public:
 
     static int config_tab_of(int f) {
         if (f == FIELD_NET_PORT || f == FIELD_CONTROL_PORT || f == FIELD_LAN_MODE ||
-            f == FIELD_NET_AUDIO || f == FIELD_RESTART) return 1;
+            f == FIELD_NET_AUDIO || f == FIELD_VARA_PORT || f == FIELD_VARA_BIND ||
+            f == FIELD_VARA_RETRIES || f == FIELD_RESTART) return 1;
         if (f == FIELD_STYLE_ICONS || f == FIELD_STYLE_THEME || f == FIELD_STYLE_GRAPH) return 2;
         return 0;
     }
@@ -332,6 +333,9 @@ private:
         FIELD_CONTROL_PORT,
         FIELD_LAN_MODE,
         FIELD_NET_AUDIO,
+        FIELD_VARA_PORT,
+        FIELD_VARA_BIND,
+        FIELD_VARA_RETRIES,
         FIELD_RESTART,
         FIELD_STYLE_ICONS,
         FIELD_STYLE_THEME,
@@ -723,6 +727,10 @@ private:
 
                         edit_text_field(FIELD_CONTROL_PORT);
 
+                    } else if (current_field_ == FIELD_VARA_PORT ||
+                               current_field_ == FIELD_VARA_BIND ||
+                               current_field_ == FIELD_VARA_RETRIES) {
+                        edit_text_field(current_field_);
                     } else if (current_field_ == FIELD_COM_PORT) {
 
 
@@ -976,7 +984,12 @@ private:
                             show_ptt_type_dialog();
                         } else if (field == FIELD_RESTART || field == FIELD_RESTART_MODEM) {
                             confirm_restart();
-                        } else if (field == FIELD_NET_AUDIO) {
+                        } else if (field == FIELD_NET_AUDIO ||
+                                   field == FIELD_NET_PORT ||
+                                   field == FIELD_CONTROL_PORT ||
+                                   field == FIELD_VARA_PORT ||
+                                   field == FIELD_VARA_BIND ||
+                                   field == FIELD_VARA_RETRIES) {
                             edit_text_field(field);
                         } else if (field >= FIELD_MODULATION) {
                             if (event.x < 22) adjust_field(-1);
@@ -1090,6 +1103,12 @@ private:
             max_len = 5;
         } else if (field == FIELD_CONTROL_PORT) {
             max_len = 5;
+        } else if (field == FIELD_VARA_PORT) {
+            max_len = 5;
+        } else if (field == FIELD_VARA_BIND) {
+            max_len = 15;
+        } else if (field == FIELD_VARA_RETRIES) {
+            max_len = 3;
         } else if (field == FIELD_NET_AUDIO) {
             max_len = std::max(20, std::min(40, getmaxx(stdscr) / 2 - 2 - col - 1));
         } else {
@@ -1107,6 +1126,12 @@ private:
         if (field == FIELD_NET_AUDIO) {
             std::string cur = state_.net_audio_address();
             if (!cur.empty()) snprintf(buf, sizeof(buf), "%s", cur.c_str() + 4);
+        } else if (field == FIELD_VARA_PORT) {
+            snprintf(buf, sizeof(buf), "%d", state_.vara_port);
+        } else if (field == FIELD_VARA_BIND) {
+            snprintf(buf, sizeof(buf), "%s", state_.vara_bind_address.c_str());
+        } else if (field == FIELD_VARA_RETRIES) {
+            snprintf(buf, sizeof(buf), "%d", state_.vara_retries);
         }
         if (!prompt_input(row, col, buf, max_len,
                           field == FIELD_NET_AUDIO ? "host:port" : nullptr)) return;
@@ -1186,6 +1211,36 @@ private:
                         state_.control_port = port;
                         state_.add_log("(!) Control port changed, restart required");
                         apply_settings();
+                    }
+                } catch (...) {}
+            } else if (field == FIELD_VARA_PORT) {
+                try {
+                    int port = std::stoi(buf);
+                    if (port >= 0 && port <= 65534) {
+                        state_.vara_port = port;
+                        state_.add_log(port > 0
+                            ? "(!) VARA port changed, restart required"
+                            : "(!) VARA port disabled, restart required");
+                        apply_settings();
+                    }
+                } catch (...) {}
+            } else if (field == FIELD_VARA_BIND) {
+                struct in_addr a;
+                if (inet_pton(AF_INET, buf, &a) == 1) {
+                    state_.vara_bind_address = buf;
+                    state_.add_log("(!) VARA bind address changed, restart required");
+                    apply_settings();
+                } else {
+                    state_.add_log(std::string("(!) Invalid VARA bind address '") + buf + "'");
+                }
+            } else if (field == FIELD_VARA_RETRIES) {
+                try {
+                    int n = std::stoi(buf);
+                    if (n >= 1 && n <= 255) {
+                        state_.vara_retries = n;
+                        apply_settings();
+                    } else {
+                        state_.add_log("(!) VARA retries must be 1-255");
                     }
                 } catch (...) {}
             }
@@ -1435,7 +1490,10 @@ private:
             if (field == FIELD_CONTROL_PORT) return 2;
             if (field == FIELD_LAN_MODE) return 3;
             if (field == FIELD_NET_AUDIO) return 4;
-            return 7;
+            if (field == FIELD_VARA_PORT) return 5;
+            if (field == FIELD_VARA_BIND) return 6;
+            if (field == FIELD_VARA_RETRIES) return 7;
+            return 10; // FIELD_RESTART
         }
         if (config_tab_ == 2) return field == FIELD_STYLE_GRAPH ? 3 : field == FIELD_STYLE_THEME ? 2 : 1;
         int row = 0;
@@ -3812,6 +3870,29 @@ private:
                 std::string na = state_.net_audio_address();
                 draw_field(dy, c1, c2, "Net Audio", FIELD_NET_AUDIO, na.empty() ? "OFF" : na, true);
             }
+            row++;
+            dy = visible_y(row);
+            if (dy >= 0) {
+                char buf[32];
+                if (state_.vara_port > 0)
+                    snprintf(buf, sizeof(buf), "%d", state_.vara_port);
+                else
+                    snprintf(buf, sizeof(buf), "off");
+                draw_field(dy, c1, c2, "VARA Port", FIELD_VARA_PORT, buf, true);
+            }
+            row++;
+            dy = visible_y(row);
+            if (dy >= 0) {
+                draw_field(dy, c1, c2, "VARA Bind", FIELD_VARA_BIND,
+                           state_.vara_bind_address, true);
+            }
+            row++;
+            dy = visible_y(row);
+            if (dy >= 0) {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d", state_.vara_retries);
+                draw_field(dy, c1, c2, "VARA Retries", FIELD_VARA_RETRIES, buf, true);
+            }
             row += 2;
             dy = visible_y(row);
             if (dy >= 0) {
@@ -4734,6 +4815,24 @@ private:
         y++;
         mvaddstr(y, c3, "Control bind");
         mvprintw(y, c4, "%s", state_.control_bind_address.c_str());
+        attroff(A_DIM);
+        y += 2;
+        attron(COLOR_PAIR(4) | A_BOLD);
+        mvaddstr(y, c3, "VARA (linbpq)");
+        attroff(COLOR_PAIR(4) | A_BOLD);
+        y++;
+        mvaddstr(y, c3, "Command");
+        if (state_.vara_port > 0)
+            mvprintw(y, c4, "%d  (data %d)", state_.vara_port, state_.vara_port + 1);
+        else
+            mvaddstr(y, c4, "off");
+        y++;
+        attron(A_DIM);
+        mvaddstr(y, c3, "Bind");
+        mvprintw(y, c4, "%s", state_.vara_bind_address.c_str());
+        y++;
+        mvaddstr(y, c3, "Retries");
+        mvprintw(y, c4, "%d", state_.vara_retries);
         attroff(A_DIM);
         y += 2;
         attron(COLOR_PAIR(4) | A_BOLD);
@@ -6810,6 +6909,9 @@ private:
             {"Control port", "TCP port, 8073 by default, for the JSON control API: read SNR and channel state, change modes, or pass commands through to rigctl."},
             {"LAN mode", "Listen on every network interface instead of only localhost, so other machines on your LAN can use the modem."},
             {"Net audio", "Use a sound card on another machine over TCP instead of a local one. Enter host:port; the other end must be listening. PTT still keys from this machine."},
+            {"VARA port", "Optional VARA-compatible command TCP port for linbpq DRIVER=VARA. Data uses port+1. 0 = off. Needs a restart after changing."},
+            {"VARA bind", "IPv4 address the VARA command/data ports listen on. Default 127.0.0.1. Needs a restart after changing."},
+            {"VARA retries", "Default CONNECT attempts before giving up (1-255, default 15). Host RETRIES can override for the next call. Applies live."},
             {"Config token", "A short code that packs up your modem settings. Share it so another station can paste it in and match your setup."},
             {"Presets", "Saved sets of settings. In the config tab, s saves the current one and x deletes it."},
         };
