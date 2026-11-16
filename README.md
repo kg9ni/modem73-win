@@ -1,4 +1,3 @@
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://i.ibb.co/LDNR23jg/MODEM73-white.png">
@@ -7,13 +6,26 @@
   </picture>
 </p>
 
+# kg9ni/modem73-win
 
-MODEM73 is an open source software modem that works with any HF, VHF, or UHF radio capable of 2400 Hz of bandwidth. All you need is a sound card and audio cable for your radio.
+Windows build of [MODEM73](https://modem73.app/) for native Win32 (soundcard + PDCurses TUI). This repository is **[kg9ni](https://github.com/kg9ni)’s fork** of the upstream Windows port — not the stock RFnexus release.
 
+| | |
+| --- | --- |
+| **This fork** | [kg9ni/modem73-win](https://github.com/kg9ni/modem73-win) — VARA host for linbpq, GUI Network VARA settings, BUSY/RETRIES fixes |
+| **Upstream Windows (2.5.0)** | [RFnexus/modem73-win](https://github.com/RFnexus/modem73-win) — base Win32/PDCurses port |
+| **Matching Linux fork** | [kg9ni/modem73](https://github.com/kg9ni/modem73) — same VARA / BUSY / RETRIES work on Linux |
 
-### NOTE:
+### What’s different from RFnexus/modem73-win 2.5.0
 
-This fork of the [modem73](https://github.com/RFnexus/modem73) upstream uses LLM assisted tooling for porting modem73 to Win32 exclusive APIs and PDcurses.  As such this repo is  experimental. For Windows users it's recommended to use the upstream modem73 with [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) for stability when serial PTT is not needed
+Based on upstream **2.5.0**, then adds:
+
+- **VARA-compatible command/data ports** so [linbpq](https://github.com/g8bpq/linbpq) / BPQ32 can attach with `DRIVER=VARA` (see [`VARA_PORT.md`](VARA_PORT.md))
+- **CONFIG → Network** GUI for **VARA Port**, **VARA Bind**, and **VARA Retries** (**v2.5.2-vara** and newer)
+- **Sticky BUSY fix** — attach no longer leaves the channel permanently `BUSY ON` for linbpq
+- **RETRIES wiring** — GUI / saved / host `RETRIES` / `--vara-retries` all drive the same live CONNECT budget
+
+For day-to-day Windows use without compiling, download **this fork’s** Release zip below. The original RFnexus Windows zip does **not** include the VARA/linbpq work.
 
 ![Screenshot](https://i.ibb.co/4ZhhvcQs/Peek-2026-01-01-10-41.gif)
 <table align="center">
@@ -29,7 +41,7 @@ This fork of the [modem73](https://github.com/RFnexus/modem73) upstream uses LLM
   </tr>
 </table>
 
-
+MODEM73 is an open source software modem that works with any HF, VHF, or UHF radio capable of 2400 Hz of bandwidth. All you need is a sound card and audio cable for your radio.
 
 SSB, AM, and FM are all supported. It's plug and play compatible with any KISS application and works with rigctl, CM108 sound devices, and serial PTT out of the box.
 
@@ -52,14 +64,40 @@ On fading/weaker HF paths, use ROBUST modes. For very weak signals or as a backu
 
 - KISS over TCP so it works with anything that speaks KISS: APRS clients, HamIRC, packet BBS software, Reticulum, custom applications
 - JSON control port API for status and configuration for writing your own programs
-- Optional VARA-compatible command/data ports so linbpq64 can attach with `DRIVER=VARA` (see `VARA_PORT.md`)
+- Optional VARA-compatible command/data ports so linbpq64 can attach with `DRIVER=VARA` (see [`VARA_PORT.md`](VARA_PORT.md))
+- CONFIG → Network GUI for VARA Port / Bind / Retries (v2.5.2+)
 - lightweight UI that runs straight from the terminal and headless mode for embedded use 
 
-## Installation
+## Download (Windows zip — no compile)
 
-Want to try out a demo of modem73 directly from your browser? Try it out here:
-https://rfnexus.github.io/modem73-wasm-demo/
-Hit "Start microphone" to begin decoding
+**Primary download (current):**
+
+[modem73_2.5.2-vara_win64.zip](https://github.com/kg9ni/modem73-win/releases/download/v2.5.2-vara/modem73_2.5.2-vara_win64.zip)
+
+Or open the [Releases](https://github.com/kg9ni/modem73-win/releases) page and grab the newest `modem73_*-vara_win64.zip`.
+
+SHA256: [modem73_2.5.2-vara_win64.zip.sha256](https://github.com/kg9ni/modem73-win/releases/download/v2.5.2-vara/modem73_2.5.2-vara_win64.zip.sha256)
+
+Prefer these **kg9ni/modem73-win** Release assets over older tags (`v2.5.1-vara`, `v2.5.0-vara`) and over [RFnexus/modem73-win releases](https://github.com/RFnexus/modem73-win/releases) if you need VARA/linbpq support.
+
+### Friend install (Windows 11)
+
+1. Download the zip from the direct link above (or from [Releases](https://github.com/kg9ni/modem73-win/releases)).
+2. Right-click the file → **Extract All…** → choose a folder (for example `Documents\modem73`) → **Extract**.
+3. Open that folder. Double-click `modem73.exe`, or from Command Prompt / PowerShell run:
+
+```text
+modem73.exe --headless --callsign YOURCALL --vara-port 8300
+```
+
+4. Or in the GUI: **CONFIG** → **Network** → set **VARA Port** to `8300` → **Restart**.
+5. Ports: **8300** command, **8301** data. Details are in `VARA_PORT.md` inside the zip.
+
+If Windows SmartScreen blocks the unsigned exe: **More info** → **Run anyway**.
+
+Browser demo (upstream WASM, decode only): https://rfnexus.github.io/modem73-wasm-demo/
+
+Step-by-step ops guide: [`QUICKSTART.md`](QUICKSTART.md)
 
 ## Building from source
 
@@ -166,7 +204,7 @@ modem73.exe --ptt cm108 --cm108-gpio 3
 
 ### Control port
 
-A control port for modem73 will automatically start on port `8073` by default. View `CONTROL_PORT.md` for the full JSON spec
+A control port for modem73 will automatically start on port `8073` by default. View [`CONTROL_PORT.md`](CONTROL_PORT.md) for the full JSON spec
 
 ### VARA port (linbpq64)
 
@@ -176,7 +214,9 @@ To let linbpq64 (or BPQ32) attach with `DRIVER=VARA` (command 8300 / data 8301):
 modem73.exe --headless --callsign N0CALL --vara-port 8300
 ```
 
-`RETRIES` defaults to 15 (xara HF); override with `--vara-retries N` or the host `RETRIES` command. See `VARA_PORT.md`.
+Or set **CONFIG → Network → VARA Port** to `8300` and **Restart** (v2.5.2+).
+
+`RETRIES` defaults to 15 (xara HF); override with `--vara-retries N`, the GUI **VARA Retries** field, or the host `RETRIES` command. See [`VARA_PORT.md`](VARA_PORT.md).
 
 
 ## Usage
@@ -217,3 +257,9 @@ control_port = 8073
 ## Settings
 
 Settings, presets, and the performance log are stored in `%APPDATA%\modem73\`.
+
+## Related projects
+
+- Linux fork with the same VARA / BUSY / RETRIES work: [kg9ni/modem73](https://github.com/kg9ni/modem73)
+- Upstream Windows port (no VARA host): [RFnexus/modem73-win](https://github.com/RFnexus/modem73-win)
+- Upstream Linux / project site: [RFnexus/modem73](https://github.com/RFnexus/modem73) · [modem73.app](https://modem73.app/)
