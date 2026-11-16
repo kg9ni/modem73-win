@@ -1,30 +1,37 @@
 # Quickstart
 
+This guide is for **[kg9ni/modem73-win](https://github.com/kg9ni/modem73-win)** — the Windows fork with VARA/linbpq support. It is based on [RFnexus/modem73-win](https://github.com/RFnexus/modem73-win) **2.5.0**, plus VARA ports, CONFIG → Network VARA settings (v2.5.2+), and BUSY/RETRIES fixes. The matching Linux fork is [kg9ni/modem73](https://github.com/kg9ni/modem73).
+
 modem73 is a free, open source software modem. It has configs for any setup, from line of sight UHF links over FM to HF propagation. This guide gets you running in under 5 minutes.
 
-## Step 1: Download & install
+## Step 1: Download & install (Windows)
 
-The first step is to download either the source or compiled binary for your system from [modem73.app](https://modem73.app/index.html).
+**Primary download (current):**
 
-If you're building from source, follow along with the instructions in the README or run `install.sh` if you are on a Debian or Arch based system.
+https://github.com/kg9ni/modem73-win/releases/download/v2.5.2-vara/modem73_2.5.2-vara_win64.zip
 
-For a precompiled build, find the release that matches your OS and architecture:
+Or open [Releases](https://github.com/kg9ni/modem73-win/releases) and take the newest `modem73_*-vara_win64.zip`.
 
-- **Raspberry Pi** (Pi 5, Pi Zero 2): Debian 12 or Debian 13 `arm64`
-- **Everything else**: match your architecture. Builds are available for Ubuntu, Debian, and Mint.
-- **Windows**: see the separate Windows README and find the latest releases at [github.com/RFnexus/modem73-win/releases](https://github.com/RFnexus/modem73-win/releases)
+Do **not** use the stock [RFnexus/modem73-win](https://github.com/RFnexus/modem73-win/releases) zip if you need VARA/linbpq — that tree is upstream **2.5.0** without this fork’s host ports and fixes.
 
-Install the package with `apt` or your system's package manager:
+### Friend install
 
+1. Download the zip from the direct link above.
+2. Right-click the file → **Extract All…** → choose a folder (for example `Documents\modem73`) → **Extract**.
+3. Open that folder. Double-click `modem73.exe`, or from Command Prompt / PowerShell run:
+
+```text
+modem73.exe --headless --callsign YOURCALL --vara-port 8300
 ```
-sudo apt install ./modem73_<version>_<arch>.deb
-```
 
-### Installing (Windows)
+4. Or in the GUI: **CONFIG** → **Network** → set **VARA Port** to `8300` (and optionally **VARA Bind** / **VARA Retries**) → **Restart**.
+5. Ports: **8300** command, **8301** data. See [`VARA_PORT.md`](VARA_PORT.md) in the zip or this repo.
 
-Grab the latest build from the [modem73-win releases](https://github.com/RFnexus/modem73-win/releases). The Windows build is a separate fork, ported to Win32 APIs and PDCurses with LLM assisted tooling, so treat it as experimental. If you do not need serial PTT, running the upstream build under [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) is the more stable path.
+If Windows SmartScreen blocks the unsigned exe: **More info** → **Run anyway**.
 
-To build it yourself, everything is vendored under `deps/` (aicodix DSP, PDCurses, hidapi, miniaudio, cJSON) and the exe is statically linked, so there is nothing external to install at build or run time. CM108 USB PTT is always enabled.
+### Build from source (optional)
+
+Everything is vendored under `deps/` (aicodix DSP, PDCurses, hidapi, miniaudio, cJSON) and the exe is statically linked, so there is nothing external to install at build or run time. CM108 USB PTT is always enabled.
 
 Native on Windows, from a MinGW64 shell after installing [MSYS2](https://www.msys2.org/):
 
@@ -43,25 +50,10 @@ make
 
 Either way you end up with `modem73.exe`.
 
+For Linux packages and the browser demo, see [modem73.app](https://modem73.app/index.html) and the [kg9ni/modem73](https://github.com/kg9ni/modem73) Linux fork.
 ## Step 2: Launch modem73
 
-Once installed, you can launch modem73 in any terminal.
-
-```
-modem73
-```
-
-By default it will start in UI mode where you can configure all of the settings.
-
-To navigate the program you can click with the mouse or use the shortcut keys:
-
-- **Tab** to change tabs
-- **Up and down arrow keys** to move options
-- **Left and right arrow keys** to change values, or when on a value that can be selected from a dropdown, **Enter**
-
-### Launching (Windows)
-
-On Windows you will want to call the .exe instead:
+On Windows, run the `.exe` from the folder you extracted:
 
 ```
 # Start in UI mode
@@ -74,6 +66,13 @@ modem73.exe --headless
 modem73.exe --help
 ```
 
+By default it starts in UI mode where you can configure all of the settings.
+
+To navigate the program you can click with the mouse or use the shortcut keys:
+
+- **Tab** to change tabs
+- **Up and down arrow keys** to move options
+- **Left and right arrow keys** to change values, or when on a value that can be selected from a dropdown, **Enter**
 ## Step 3: Config
 
 The first tab you will want to head over to is CONFIG. Under config, you'll want to configure your:
@@ -254,7 +253,17 @@ modem73 --control-port 8073
 
 Send `{"cmd": "get_config"}` to read the current settings, including `payload_size`, which tells you the largest frame the current mode can carry. `{"cmd": "set_config", "robust_mode": 6}` changes the mode on the fly, and the modem pushes an event to every connected client whenever anything changes.
 
-Full command list in [CONTROL_PORT.md](https://github.com/RFnexus/modem73/blob/master/CONTROL_PORT.md).
+Full command list in [`CONTROL_PORT.md`](CONTROL_PORT.md).
+
+### VARA PORT (linbpq / BPQ32)
+
+This fork can speak a VARA-compatible host API so linbpq attaches with `DRIVER=VARA`:
+
+```
+modem73.exe --headless --callsign YOURCALL --vara-port 8300
+```
+
+Or **CONFIG → Network → VARA Port** = `8300`, then **Restart**. Command port **8300**, data **8301**. See [`VARA_PORT.md`](VARA_PORT.md).
 
 ### WORKING EXAMPLES
 
@@ -422,6 +431,10 @@ TCP port, 8001 by default, where applications send and receive packets.
 
 TCP port, 8073 by default, for the JSON control API: read SNR and channel state, change modes, or pass commands through to rigctl.
 
+**VARA Port / Bind / Retries** (this fork, v2.5.2+)
+
+Under **CONFIG → Network**: enable the VARA-compatible host for linbpq (`DRIVER=VARA`). Port `8300` means command on 8300 and data on 8301. **VARA Retries** sets the CONNECT attempt budget (same as host `RETRIES` / `--vara-retries`). Port/bind need a restart; retries apply immediately. Full detail: [`VARA_PORT.md`](VARA_PORT.md).
+
 **LAN mode**
 
 Listen on every network interface instead of only localhost, so other machines on your LAN can use the modem.
@@ -434,4 +447,4 @@ A short code that packs up your modem settings. Share it so another station can 
 
 Saved sets of settings. In the config tab, s saves the current one and x deletes it.
 
-Source: https://modem73.app/quickstart.html
+Adapted from https://modem73.app/quickstart.html for this Windows fork.
