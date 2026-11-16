@@ -69,6 +69,10 @@ public:
         std::function<size_t()> payload_capacity;
         std::function<void(float)> set_drive; // linear 0.05..1.0
         std::function<float()> get_drive;
+        std::function<void(const std::string&)> log; // modem73 UI / stderr
+        // Fired whenever the live connect-attempt budget changes (host RETRIES
+        // or set_retries) so GUI/STATUS/saved settings stay in sync.
+        std::function<void(uint32_t)> on_retries_changed;
     };
 
     VaraPort(int cmd_port, const std::string& bind_address, uint32_t retries, Hooks hooks)
@@ -151,6 +155,30 @@ public:
         return retries_;
     }
 
+    // Hot-update the configured connect-attempt budget (GUI / saved settings).
+    // Updates both the live value and the RETRIES 0 restore baseline.
+    void set_retries(uint32_t n) {
+        if (n < 1 || n > 255) return;
+        uint32_t live = 0;
+        bool changed = false;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            // GUI / saved settings become the new RETRIES-0 restore baseline.
+            changed = (retries_ != n) || (saved_retries_ != n);
+            retries_ = n;
+            saved_retries_ = n;
+            live = retries_;
+        }
+        if (changed) notify_retries(live);
+    }
+
+    // Test helper: shorten the inter-attempt wait (default CONNECT_RETRY_MS).
+    void set_connect_retry_ms_for_test(int ms) {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (ms >= 1 && ms <= CONNECT_RETRY_MS)
+            connect_retry_ms_ = ms;
+    }
+
 private:
     enum class State { Idle, Listen, Calling, Answering, Connected };
 
@@ -187,6 +215,7 @@ private:
     uint32_t bw_hz_ = 2300;
     uint32_t saved_retries_ = DEFAULT_RETRIES;
     uint32_t connect_attempts_ = 0;
+    int connect_retry_ms_ = CONNECT_RETRY_MS;
     Comp compression_ = Comp::Text;
     std::vector<std::string> mycalls_;
     std::string peer_call_;
@@ -487,7 +516,12 @@ private:
         return state_ == State::Idle || state_ == State::Listen;
     }
 
-    void handle_line_locked(const std::string& line) {
+    void handle_line_locked(std::string line) {
+        // Host scripts sometimes indent CONFIG lines; trim before matching.
+        while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
+            line.erase(line.begin());
+        while (!line.empty() && (line.back() == ' ' || line.back() == '\t'))
+            line.pop_back();
         if (line == "VERSION") {
             say_locked(VERSION_HF);
             return;
@@ -635,12 +669,23 @@ private:
         if (!v) return;
         double r = std::round(*v);
         if (r == 0.0) {
-            if (saved_retries_ > 0) retries_ = saved_retries_;
+            if (saved_retries_ > 0 && retries_ != saved_retries_) {
+                retries_ = saved_retries_;
+                // Callback must not re-enter VaraPort (kiss_tnc only touches UI/TNC config).
+                if (hooks_.on_retries_changed) hooks_.on_retries_changed(retries_);
+            }
             return;
         }
-        if (r < 0.0 || r > 255.0) return;
+        if (r < 1.0 || r > 255.0) return;
+        uint32_t n = (uint32_t)r;
+        if (n == retries_) return;
         saved_retries_ = retries_;
-        retries_ = (uint32_t)r;
+        retries_ = n;
+        if (hooks_.on_retries_changed) hooks_.on_retries_changed(retries_);
+    }
+
+    void notify_retries(uint32_t n) {
+        if (hooks_.on_retries_changed) hooks_.on_retries_changed(n);
     }
 
     void apply_drive_locked(const std::string& rest) {
@@ -718,6 +763,12 @@ private:
         state_ = State::Calling;
         connect_attempts_ = 0;
         say_locked("OK");
+        // xara/VARA raise BUSY while an outbound call is in progress.
+        if (!busy_announced_) {
+            busy_announced_ = true;
+            last_busy_ = true;
+            say_locked("BUSY ON");
+        }
         // First attempt immediately; further attempts up to RETRIES.
         attempt_connect_locked();
     }
@@ -726,13 +777,47 @@ private:
         if (state_ != State::Calling) return;
         if (connect_attempts_ >= retries_) {
             // Exhausted user/host RETRIES — give up like xara/VARA.
-            finish_disconnect_locked(false);
+            fail_calling_locked();
+            return;
+        }
+        // Like xara: do not burn an attempt while the previous TX is still keyed.
+        // Defer until PTT drops so the budget matches audible RF tries.
+        if (hooks_.is_ptt && hooks_.is_ptt()) {
+            next_retry_ = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(100);
             return;
         }
         connect_attempts_++;
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Calling %u/%u", connect_attempts_, retries_);
+        log_locked(msg);
         send_conn_locked(1, local_call_, peer_call_);
         next_retry_ = std::chrono::steady_clock::now() +
-                      std::chrono::milliseconds(CONNECT_RETRY_MS);
+                      std::chrono::milliseconds(connect_retry_ms_);
+    }
+
+    // Report a failed outbound call with a complete peer callsign, then
+    // DISCONNECTED (+ BUSY OFF). linbpq prints "VARA} Failure with <call>";
+    // modem73 mirrors that wording on its own log so the callsign is intact.
+    void fail_calling_locked() {
+        std::string peer = shown_call(peer_call_);
+        if (peer.empty())
+            peer = shown_call(local_call_);
+        if (peer.empty())
+            peer = "?";
+        log_locked("Failure with " + peer);
+        bool clear_busy = busy_announced_;
+        finish_disconnect_locked(false);
+        if (clear_busy) {
+            busy_announced_ = false;
+            last_busy_ = false;
+            say_locked("BUSY OFF");
+        }
+    }
+
+    void log_locked(const std::string& msg) {
+        if (hooks_.log) hooks_.log(msg);
+        else std::cerr << "VARA: " << msg << std::endl;
     }
 
     bool is_mycall_locked(const std::string& c) const {
@@ -825,11 +910,13 @@ private:
     void finish_disconnect_locked(bool /*abort*/) {
         bool was = state_ == State::Connected || state_ == State::Calling ||
                    state_ == State::Answering;
+        // Keep callsigns until after DISCONNECTED is queued so any log/line
+        // that still needs the peer sees a complete callsign.
         state_ = listen_ ? State::Listen : State::Idle;
         connect_attempts_ = 0;
+        if (was) say_locked("DISCONNECTED");
         peer_call_.clear();
         local_call_.clear();
-        if (was) say_locked("DISCONNECTED");
     }
 
     void pump_tx_locked() {
@@ -884,11 +971,21 @@ private:
                         say_locked(ptt ? "PTT ON" : "PTT OFF");
                     }
                 }
+                // Reconcile announced BUSY to RF/session state — same as xara:
+                // compare against busy_announced_ (not a separate sensor latch).
+                // Host-attach and CHAT ON toggle BUSY ON once; the next tick
+                // must clear it when the channel is actually quiet, or linbpq
+                // never sends CONNECT ("Sorry, Can't Connect - Channel is busy").
+                // While Calling/Answering/Connected, force busy like xara's
+                // non-Listen forced hang.
                 if (hooks_.is_busy) {
                     bool busy = hooks_.is_busy();
-                    if (busy != last_busy_) {
-                        last_busy_ = busy;
+                    if (state_ == State::Calling || state_ == State::Answering ||
+                        state_ == State::Connected)
+                        busy = true;
+                    if (busy != busy_announced_) {
                         busy_announced_ = busy;
+                        last_busy_ = busy;
                         say_locked(busy ? "BUSY ON" : "BUSY OFF");
                     }
                 }

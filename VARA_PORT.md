@@ -33,6 +33,8 @@ vara_bind_address=127.0.0.1
 vara_retries=15
 ```
 
+In the TUI: **CONFIG → Network** has **VARA Port**, **VARA Bind**, and **VARA Retries**. Port/bind changes need a restart; retries apply immediately. The STATUS network pane shows the current VARA listen ports.
+
 The existing JSON control port (`8073`) and KISS port (`8001`) are unchanged.
 
 ## linbpq64
@@ -65,6 +67,16 @@ When linbpq (or another host) issues `CONNECT mycall remote`, modem73 transmits 
 
 Local default if the host never sends `RETRIES`: `--vara-retries` / `vara_retries` (default 15).
 
+Host `RETRIES`, the GUI **VARA Retries** field, saved `vara_retries`, and `--vara-retries` all update the **same** live connect budget. STATUS → Network → Retries should match what CONNECT will use.
+
+### Set / verify (Ernie)
+
+1. In modem73: **CONFIG → Network → VARA Retries** → type `20` → Enter (applies immediately; also saved).
+2. Or in linbpq `CONFIG` put `RETRIES 20` (forwarded on attach).
+3. Or start with `--vara-retries 20`.
+4. Check **STATUS → Retries** shows `20`, and the modem log line when VARA ports start includes `retries 20`.
+5. On an unanswered call, the log should show `VARA: Calling 1/20` … `VARA: Calling 20/20` then `VARA: Failure with …` — not stop at `15/15`.
+
 ## Command highlights
 
 Framing: one command per line ending in `\r` (`\n` ignored). Replies end with `\r`.
@@ -79,8 +91,11 @@ Framing: one command per line ending in `\r` (`\n` ignored). Replies end with `\
 | `BW500` / `BW2300` / `BW2750` | Stored for `CONNECTED …` width reporting |
 | `CLEANTXBUFFER` | `BUFFEREMPTY` or `FAILED ` |
 | `IAMALIVE` | Emitted about every 60s while a host is attached |
+| `BUSY ON` / `OFF` | Channel/session busy for linbpq. Host attach pulses ON then OFF when quiet (xara-compatible). Stays ON while Calling/Connected or when CSMA hears a real busy channel. |
 
 One TCP client per command port and one per data port (second connection refused while busy). Dropping either side closes the pair.
+
+**linbpq note:** If the modem stays on `BUSY ON` while the frequency is empty, linbpq will not send `CONNECT` and prints `Sorry, Can't Connect - Channel is busy`. Meantime knobs: raise CSMA **Threshold** a few dB above the noise floor, or switch CSMA **Mode** to **SYNC** so only real modem73 signals count as busy.
 
 ## Gaps vs xara
 

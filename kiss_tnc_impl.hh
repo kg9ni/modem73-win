@@ -2700,6 +2700,14 @@ public:
             ptt_reinit_at_ms_.store(steady_now_ms() + PTT_REINIT_SETTLE_MS);
         }
 
+        // Keep VARA host settings in the live TNC config so get_config() and any
+        // later apply path see the user-set connect budget (not the startup default).
+        if (new_config.vara_retries >= 1 && new_config.vara_retries <= 255)
+            config_.vara_retries = new_config.vara_retries;
+        if (new_config.vara_port >= 0 && new_config.vara_port <= 65534)
+            config_.vara_port = new_config.vara_port;
+        config_.vara_bind_address = new_config.vara_bind_address;
+
         return rejected;
     }
 
@@ -2841,6 +2849,27 @@ public:
     bool is_receiving() const {
         std::lock_guard<std::mutex> lock(lockout_mutex_);
         return std::chrono::steady_clock::now() < tx_lockout_until_;
+    }
+
+    // Instantaneous channel busy for VARA BUSY ON/OFF (linbpq gating).
+    // Matches CSMA "occupied" sense: RX lockout/DCD, or THRESHOLD mode with
+    // level above carrier_threshold_db. Does NOT use occupancy EMA residue
+    // (channel_occupancy()>0 stays true long after a quiet channel).
+    bool channel_is_busy() {
+        if (is_receiving()) return true;
+        bool csma_on = false;
+        bool sync_only = false;
+        float thresh = -30.0f;
+        int sense_ms = 100;
+        {
+            std::lock_guard<std::mutex> lock(config_mutex_);
+            csma_on = config_.csma_enabled;
+            sync_only = config_.csma_sync_only;
+            thresh = config_.carrier_threshold_db;
+            sense_ms = config_.carrier_sense_ms;
+        }
+        if (!csma_on || sync_only || !audio_) return false;
+        return audio_->instant_level_db(sense_ms) > thresh;
     }
 
     int get_client_count() const {
