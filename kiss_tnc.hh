@@ -177,6 +177,12 @@ struct TNCConfig {
     // Control port
     int control_port = 8073;
 
+    // VARA-compatible command/data ports for linbpq64 (0 = disabled).
+    // Data port is always vara_port + 1. RETRIES defaults match xara HF (15).
+    int vara_port = 0;
+    std::string vara_bind_address = "127.0.0.1";
+    int vara_retries = 15;
+
     bool perf_log = true;
 
     // Settings file path
