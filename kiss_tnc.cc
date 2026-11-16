@@ -285,6 +285,15 @@ static bool apply_settings_file(const std::string& path, TNCConfig& config,
         }
         else if (!strcmp(key, "bind_address") && take(key)) config.bind_address = value;
         else if (!strcmp(key, "control_bind_address") && take(key)) config.control_bind_address = value;
+        else if (!strcmp(key, "vara_port") && take(key)) {
+            int v = atoi(value);
+            if (v >= 0 && v <= 65534) config.vara_port = v;
+        }
+        else if (!strcmp(key, "vara_bind_address") && take(key)) config.vara_bind_address = value;
+        else if (!strcmp(key, "vara_retries") && take(key)) {
+            int v = atoi(value);
+            if (v >= 1 && v <= 255) config.vara_retries = v;
+        }
     }
 
     fclose(f);
@@ -359,6 +368,11 @@ void print_help(const char* prog) {
               << "      --bind ADDR         KISS bind address (default: 0.0.0.0)\n"
               << "      --control-port PORT Control port (default: 8073, 0 to disable)\n"
               << "      --control-bind ADDR Control port bind address (default: 127.0.0.1)\n"
+              << "      --vara-port PORT    VARA command port for linbpq (default: 0=off;\n"
+              << "                          data port is PORT+1, e.g. 8300/8301)\n"
+              << "      --vara-bind ADDR   VARA ports bind address (default: 127.0.0.1)\n"
+              << "      --vara-retries N   Default CONNECT attempts before giving up\n"
+              << "                          (1-255, default: 15; host RETRIES overrides)\n"
               << "\nAudio:\n"
               << "  -d, --device DEV        Audio device for both capture and playback\n"
               << "      -d tcp:HOST:PORT    Audio over TCP instead of a sound card: modem73\n"
@@ -478,6 +492,8 @@ int main(int argc, char** argv) {
     // Track which settings were explicitly set on CLI
     std::set<std::string> cli_set;
     bool cli_control_port = false;
+    bool cli_vara_port = false;
+    bool cli_vara_retries = false;
     bool cli_config = false;
 #ifdef WITH_UI
     bool attach_mode = false;
@@ -547,6 +563,17 @@ int main(int argc, char** argv) {
         } else if (arg == "--control-port" && i + 1 < argc) {
             config.control_port = std::atoi(argv[++i]);
             cli_control_port = true;
+        } else if (arg == "--vara-port" && i + 1 < argc) {
+            config.vara_port = std::min(65534, std::max(0, std::atoi(argv[++i])));
+            cli_vara_port = true;
+            cli_set.insert("vara_port");
+        } else if (arg == "--vara-bind" && i + 1 < argc) {
+            config.vara_bind_address = argv[++i];
+            cli_set.insert("vara_bind_address");
+        } else if (arg == "--vara-retries" && i + 1 < argc) {
+            config.vara_retries = clamp_arg("--vara-retries", argv[++i], 1, 255);
+            cli_vara_retries = true;
+            cli_set.insert("vara_retries");
         } else if (arg == "--config") {
             cli_config = true;
             if (i + 1 < argc && argv[i + 1][0] != '-') {
@@ -1131,6 +1158,12 @@ int main(int argc, char** argv) {
                     config.bind_address = ui_state.bind_address;
                 if (!cli_set.count("control_bind_address"))
                     config.control_bind_address = ui_state.control_bind_address;
+                if (!cli_vara_port)
+                    config.vara_port = ui_state.vara_port;
+                if (!cli_set.count("vara_bind_address"))
+                    config.vara_bind_address = ui_state.vara_bind_address;
+                if (!cli_vara_retries)
+                    config.vara_retries = ui_state.vara_retries;
 
                 std::cerr << "Loaded settings from " << ui_state.config_file << std::endl;
             } else {
@@ -1191,6 +1224,9 @@ int main(int argc, char** argv) {
                 // Network settings
                 ui_state.port = config.port;
                 ui_state.control_port = config.control_port;
+                ui_state.vara_port = config.vara_port;
+                ui_state.vara_bind_address = config.vara_bind_address;
+                ui_state.vara_retries = config.vara_retries;
                 ui_state.bind_address = config.bind_address;
                 ui_state.control_bind_address = config.control_bind_address;
 
@@ -1262,6 +1298,9 @@ int main(int argc, char** argv) {
 #endif
     ui_state.port = config.port;
     ui_state.control_port = config.control_port;
+    ui_state.vara_port = config.vara_port;
+    ui_state.vara_bind_address = config.vara_bind_address;
+    ui_state.vara_retries = config.vara_retries;
     ui_state.bind_address = config.bind_address;
     ui_state.control_bind_address = config.control_bind_address;
     for (size_t i = 0; i < MODULATION_OPTIONS.size(); ++i) {
@@ -1320,6 +1359,23 @@ int main(int argc, char** argv) {
         std::cerr << "Error: invalid control bind address '"
                   << config.control_bind_address << "'" << std::endl;
         return 1;
+    }
+    if (!valid_bind_address(config.vara_bind_address)) {
+        std::cerr << "Error: invalid VARA bind address '"
+                  << config.vara_bind_address << "'" << std::endl;
+        return 1;
+    }
+    if (config.vara_port > 0) {
+        if (config.vara_port >= 65535) {
+            std::cerr << "Error: --vara-port must be below 65535 (data port is port+1)" << std::endl;
+            return 1;
+        }
+        if (!check_port_available(config.vara_bind_address, config.vara_port) ||
+            !check_port_available(config.vara_bind_address, config.vara_port + 1)) {
+            std::cerr << "Error: VARA ports " << config.vara_port << "/" << (config.vara_port + 1)
+                      << " are already in use on " << config.vara_bind_address << std::endl;
+            return 1;
+        }
     }
 
     while (!check_port_available(config.bind_address, config.port)) {
@@ -1421,6 +1477,7 @@ int main(int argc, char** argv) {
 
         // Set up control port
         std::unique_ptr<ControlPort> ctrl;
+        std::unique_ptr<VaraPort> vara;
 #ifdef WITH_UI
         auto apply_ui_settings = [&tnc, &ctrl](TNCUIState& state) {
             TNCConfig new_config = tnc.get_config();
@@ -2097,6 +2154,37 @@ int main(int argc, char** argv) {
             };
         }
 
+        if (config.vara_port > 0) {
+            VaraPort::Hooks vh;
+            vh.queue_tx = [&tnc](const std::vector<uint8_t>& data) {
+                tnc.queue_data(data);
+            };
+            vh.is_ptt = [&tnc]() { return tnc.is_transmitting(); };
+            vh.is_busy = [&tnc]() {
+                return tnc.is_receiving() || tnc.channel_occupancy() > 0;
+            };
+            vh.payload_capacity = [&tnc]() {
+                return (size_t)std::max(16, tnc.get_payload_size());
+            };
+            vh.set_drive = [&tnc](float d) {
+                TNCConfig c = tnc.get_config();
+                c.tx_drive = d;
+                tnc.update_config(c);
+            };
+            vh.get_drive = [&tnc]() {
+                return tnc.get_config().tx_drive;
+            };
+            vara = std::make_unique<VaraPort>(config.vara_port, config.vara_bind_address,
+                                              (uint32_t)config.vara_retries, std::move(vh));
+            if (!vara->start()) {
+                std::cerr << "Error: failed to start VARA ports" << std::endl;
+                return 1;
+            }
+            tnc.consume_rx = [&vara](const std::vector<uint8_t>& payload) -> bool {
+                return vara && vara->handle_rx(payload);
+            };
+        }
+
 #ifdef WITH_UI
         if (g_use_ui) {
             ui_state.perf_logger = &tnc.perf_log_;
@@ -2183,6 +2271,7 @@ int main(int argc, char** argv) {
 #else
         tnc.run();
 #endif
+        if (vara) vara->stop();
         if (ctrl) ctrl->stop();
         g_shutdown_tnc.store(nullptr);
         g_shutdown_complete.store(true);

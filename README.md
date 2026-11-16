@@ -52,6 +52,7 @@ On fading/weaker HF paths, use ROBUST modes. For very weak signals or as a backu
 
 - KISS over TCP so it works with anything that speaks KISS: APRS clients, HamIRC, packet BBS software, Reticulum, custom applications
 - JSON control port API for status and configuration for writing your own programs
+- Optional VARA-compatible command/data ports so linbpq64 can attach with `DRIVER=VARA` (see `VARA_PORT.md`)
 - lightweight UI that runs straight from the terminal and headless mode for embedded use 
 
 ## Installation
@@ -166,6 +167,17 @@ modem73.exe --ptt cm108 --cm108-gpio 3
 ### Control port
 
 A control port for modem73 will automatically start on port `8073` by default. View `CONTROL_PORT.md` for the full JSON spec
+
+### VARA port (linbpq64)
+
+To let linbpq64 (or BPQ32) attach with `DRIVER=VARA` (command 8300 / data 8301):
+
+```
+modem73.exe --headless --callsign N0CALL --vara-port 8300
+```
+
+`RETRIES` defaults to 15 (xara HF); override with `--vara-retries N` or the host `RETRIES` command. See `VARA_PORT.md`.
+
 
 ## Usage
 <img width="1092" height="847" alt="image" src="https://github.com/user-attachments/assets/7180ab80-4386-4ee1-8029-42ca5300ef13" />

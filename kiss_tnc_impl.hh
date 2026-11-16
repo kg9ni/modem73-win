@@ -51,6 +51,7 @@
 #include "phy/robust_modem.hh"
 #include "perf_log.hh"
 #include "control_port.hh"
+#include "vara_port.hh"
 
 #ifdef WITH_UI
 #include "tnc_ui_state.hh"
@@ -216,6 +217,9 @@ class KISSTNC {
 public:
     PerfLogger perf_log_;
     std::function<void(const RxFrameInfo&)> rx_frame_callback;
+    // If set and returns true, the RX payload is consumed (e.g. VARA session
+    // framing) and is not forwarded to KISS clients.
+    std::function<bool(const std::vector<uint8_t>&)> consume_rx;
 
     KISSTNC(const TNCConfig& config) : config_(config) {
         // Allocate OFDM encoder/decoder
@@ -1518,6 +1522,9 @@ private:
 
             if (rx_frame_callback)
                 rx_frame_callback(info);
+
+            if (consume_rx && consume_rx(payload))
+                return;
 
             auto kiss_frame = KISSParser::wrap(payload);
 

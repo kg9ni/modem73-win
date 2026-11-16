@@ -87,7 +87,7 @@ jobs:
         run: |
           mkdir -p dist
           cp modem73.exe dist/
-          cp README.md CONTROL_PORT.md LICENSE dist/
+          cp README.md CONTROL_PORT.md VARA_PORT.md LICENSE dist/
           (cd dist && zip "../modem73_${{ steps.ver.outputs.version }}_win64.zip" *)
           sha256sum modem73_*_win64.zip | tee modem73_${{ steps.ver.outputs.version }}_win64.zip.sha256
 
